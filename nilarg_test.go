@@ -2,10 +2,12 @@ package nilarg_test
 
 import (
 	"fmt"
+	"log"
 	"testing"
 
+	"github.com/Matts966/nilarg"
+
 	"golang.org/x/tools/go/analysis/analysistest"
-	"golang.org/x/tools/go/analysis/passes/nilarg"
 )
 
 func Test(t *testing.T) {
@@ -18,4 +20,9 @@ func Test(t *testing.T) {
 	if got != want {
 		t.Errorf("PanicArgs = %s, want %s", got, want)
 	}
+}
+
+func TestBytes(t *testing.T) {
+	log.Println(analysistest.Run(t, "", nilarg.Analyzer, "bytes"))
+	panic(nil)
 }

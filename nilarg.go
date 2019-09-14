@@ -11,7 +11,7 @@ import (
 )
 
 const Doc = `check if the function will panic on nil arguments
-`git
+`
 
 var Analyzer = &analysis.Analyzer{
 	Name:       "nilarg",
@@ -110,11 +110,11 @@ func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock) bool {
 		if binop, ok = If.Cond.(*ssa.BinOp); ok {
 			switch binop.Op {
 			case token.EQL:
-				if isNil(binop.X) && binop.Y == v || isNil(binop.Y) && binop.X== v {
+				if isNil(binop.X) && binop.Y == v || isNil(binop.Y) && binop.X == v {
 					return b == bi.Succs[1]
 				}
 			case token.NEQ:
-				if isNil(binop.X) && binop.Y == v || isNil(binop.Y) && binop.X== v {
+				if isNil(binop.X) && binop.Y == v || isNil(binop.Y) && binop.X == v {
 					return b == bi.Succs[0]
 				}
 			}
