@@ -2,11 +2,9 @@ package nilarg_test
 
 import (
 	"fmt"
-	"log"
 	"testing"
 
 	"github.com/Matts966/nilarg"
-
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
@@ -23,6 +21,16 @@ func Test(t *testing.T) {
 }
 
 func TestBytes(t *testing.T) {
-	log.Println(analysistest.Run(t, "", nilarg.Analyzer, "bytes"))
-	panic(nil)
+	for _, r := range analysistest.Run(t, "", nilarg.Analyzer, "bytes") {
+		rpa, ok := r.Result.(nilarg.PanicArgs)
+		if !ok {
+			t.Fatal("result of nilarg should be PanicArgs")
+		}
+		for k, _ := range rpa {
+			if k.Name() == "Bytes" {
+				return
+			}
+		}
+	}
+	t.Fatal("bytes.Bytes should panic on nil argument")
 }

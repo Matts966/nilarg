@@ -49,27 +49,27 @@ func runFunc(pass *analysis.Pass, fn *ssa.Function, pa PanicArgs) {
 			case *ssa.FieldAddr,
 				*ssa.IndexAddr,
 				*ssa.MapUpdate:
-				if !isNilChecked(fp, instr.Block()) {
+				if !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
 					appendPA(pa, fn, i)
 					break
 				}
 			case *ssa.Slice:
-				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && !isNilChecked(fp, instr.Block()) {
+				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
 					appendPA(pa, fn, i)
 					break
 				}
 			case *ssa.Store:
-				if !isNilChecked(fp, instr.Block()) {
+				if !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
 					appendPA(pa, fn, i)
 					break
 				}
 			case *ssa.TypeAssert:
-				if !isNilChecked(fp, instr.Block()) {
+				if !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
 					appendPA(pa, fn, i)
 					break
 				}
 			case *ssa.UnOp:
-				if instr.Op == token.MUL && !isNilChecked(fp, instr.Block()) {
+				if instr.Op == token.MUL && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
 					appendPA(pa, fn, i)
 					break
 				}
@@ -99,7 +99,12 @@ func isNillable(t types.Type) bool {
 	}
 }
 
-func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock) bool {
+func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited []*ssa.BasicBlock) bool {
+	for _, v := range visited {
+		if v == b {
+			return false
+		}
+	}
 	bi := b.Idom()
 	if bi == nil {
 		return false
@@ -120,7 +125,8 @@ func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock) bool {
 			}
 		}
 	}
-	return isNilChecked(v, b)
+	visited = append(visited, b)
+	return isNilChecked(v, b, visited)
 }
 
 func isNil(v ssa.Value) bool {
