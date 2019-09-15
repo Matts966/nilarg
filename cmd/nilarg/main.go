@@ -1,7 +1,7 @@
 package main
 
 import (
-	"golang.org/x/tools/go/analysis/passes/nilarg"
+	"github.com/Matts966/nilarg"
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
 
