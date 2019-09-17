@@ -1,5 +1,7 @@
 package a
 
+import "bytes"
+
 type X struct{ f, g int }
 
 func f(i int, ip *int, x X, xp *X) {
@@ -31,4 +33,8 @@ func f3(x *int) {
 	if x != nil {
 		_ = *x
 	}
+}
+
+func f4() {
+	bytes.NewBuffer([]byte{}).Bytes()
 }

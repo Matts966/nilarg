@@ -1,7 +1,7 @@
 package nilarg_test
 
 import (
-	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/Matts966/nilarg"
@@ -13,24 +13,13 @@ func Test(t *testing.T) {
 	result := analysistest.Run(t, testdata, nilarg.Analyzer, "a")[0].Result
 
 	panicArgs := result.(nilarg.PanicArgs)
-	got := fmt.Sprint(panicArgs)
-	want := `map[a.f:map[1:{} 3:{}] a.f2:map[0:{} 1:{}]]`
-	if got != want {
-		t.Errorf("PanicArgs = %s, want %s", got, want)
+	got := panicArgs
+	want := map[string]map[int]struct{}{
+		"(*bytes.Buffer).Bytes": map[int]struct{}{0: {}},
+		"a.f":                   map[int]struct{}{1: {}, 3: {}},
+		"a.f2":                  map[int]struct{}{0: {}, 1: {}},
 	}
-}
-
-func TestBytes(t *testing.T) {
-	for _, r := range analysistest.Run(t, "", nilarg.Analyzer, "bytes") {
-		rpa, ok := r.Result.(nilarg.PanicArgs)
-		if !ok {
-			t.Fatal("result of nilarg should be PanicArgs")
-		}
-		for k, _ := range rpa {
-			if k.Name() == "Bytes" {
-				return
-			}
-		}
+	if reflect.DeepEqual(got, want) {
+		t.Errorf("PanicArgs = %#v, want %#v", got, want)
 	}
-	t.Fatal("bytes.Bytes should panic on nil argument")
 }
