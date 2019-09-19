@@ -99,7 +99,7 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 		}
 	}
 	// If no argument cause panic, skip exporting the fact.
-	if len(fact) > 0 {
+	if len(fact) > 0 && fn.Object() != nil {
 		pass.ExportObjectFact(fn.Object(), &fact)
 	}
 }
