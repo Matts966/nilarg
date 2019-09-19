@@ -20,12 +20,8 @@ var Analyzer = &analysis.Analyzer{
 	FactTypes: []analysis.Fact{new(panicArgs)},
 }
 
-// ssapkgs stores compiled ssa packages for checking imported packages.
-// Note that imported packages are not fully compiled because of lack of
-// files by default, and need to be compiled.
-var ssapkgs = make(map[string]*ssa.Package)
-
-// panicArgs has the information about arguments which causes panic on calling the function when it is nil.
+// panicArgs has the information about arguments which causes panic on
+// calling the function when it is nil.
 type panicArgs map[int]struct{}
 
 func (*panicArgs) AFact() {}
@@ -38,18 +34,13 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-// checkFunc appends the information of arguments to pa when they cause
-// panic in fn. Also, if src is set true, the CallInstructions in fn
-// will be checked as the same.
+// checkFunc finds arguments of fn that can be nil and cause panic in
+// fn when they are nil.
 func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 	fact := panicArgs{}
-	if fn.Object() == nil {
-		return
-	}
-	if pass.ImportObjectFact(fn.Object(), &fact) {
-		return
-	}
 	for i, fp := range fn.Params {
+		// If the argument fp can't be nil or there are no referrers
+		// of fp in fn, skip check.
 		if !isNillable(fp.Type()) {
 			continue
 		}
@@ -58,6 +49,8 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 		}
 
 	refLoop:
+		// Check all the referrers and if the instruction cause panic when
+		// fp is nil, add fact of it and break this loop.
 		for _, fpr := range *fp.Referrers() {
 			switch instr := fpr.(type) {
 			case *ssa.FieldAddr:
@@ -81,6 +74,8 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 					break refLoop
 				}
 			case *ssa.Slice:
+				// Slice operation to a pointer ptr cause nil pointer
+				// dereference iff ptr is nil.
 				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
@@ -103,6 +98,7 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 			}
 		}
 	}
+	// If no argument cause panic, skip exporting the fact.
 	if len(fact) > 0 {
 		pass.ExportObjectFact(fn.Object(), &fact)
 	}
@@ -121,7 +117,8 @@ func isNillable(t types.Type) bool {
 	}
 }
 
-// isNilChecked returns true when the v is already nil checked and definitely not nil in the b.
+// isNilChecked returns true when the v is already nil checked and
+// definitely not nil in the b.
 func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited []*ssa.BasicBlock) bool {
 	for _, v := range visited {
 		if v == b {
