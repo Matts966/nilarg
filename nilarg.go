@@ -35,7 +35,16 @@ func run(pass *analysis.Pass) (interface{}, error) {
 }
 
 // checkFunc finds arguments of fn that can be nil and cause panic in
-// fn when they are nil.
+// fn when they are nil and export their information as the Facts.
+//
+// The Facts are such as:
+// 	f(x *int) { *x }
+// and:
+// 	f(m map[int]int) { map[5] = 5 }
+// and:
+// 	f(i interface{}) { i.(interface{ f() }) }
+//
+// These codes do not always cause panic, but panic if the argument is nil.
 func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 	fact := panicArgs{}
 	for i, fp := range fn.Params {
@@ -54,43 +63,52 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 		for _, fpr := range *fp.Referrers() {
 			switch instr := fpr.(type) {
 			case *ssa.FieldAddr:
+				// the address of fp.field
 				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.Field:
+				// fp.field
 				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.IndexAddr:
+				// fp[i]
 				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.TypeAssert:
+				// fp.(someType)
 				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.Slice:
-				// Slice operation to a pointer ptr cause nil pointer
-				// dereference iff ptr is nil.
+				// Slice operation to a pointer fp cause nil pointer
+				// dereference iff fp is nil.
+				//
+				// fp[:]
 				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.Store:
+				// *fp = v
 				if instr.Addr == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.MapUpdate:
+				// *fp[x] = y
 				if instr.Map == fp && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.UnOp:
+				// *fp
 				if instr.X == fp && instr.Op == token.MUL && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
