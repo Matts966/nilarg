@@ -1,17 +1,12 @@
 package a
 
-import (
-	"bytes"
-	"net/http"
-)
-
 type X struct{ f, g int }
 
-func f(i int, ip *int, x X, xp *X) {
+func f(i int, ip *int, x X, xp *X) { // want f:"&map\\[1:{} 3:{}\\]"
 	print(i, *ip /* can be nil dereference */, x, *xp /* can be nil dereference */)
 }
 
-func f2(x *int, ptr *[3]int, i interface{}, m map[int]int) {
+func f2(x *int, ptr *[3]int, i interface{}, m map[int]int) { // want f2:"&map\\[0:{} 1:{} 2:{} 3:{}\\]"
 	// These can be nil dereferences.
 	*x = 5
 	print(ptr[:])
@@ -19,7 +14,7 @@ func f2(x *int, ptr *[3]int, i interface{}, m map[int]int) {
 	m[5] = 5
 }
 
-func f3(ptr *[3]int) {
+func f3(ptr *[3]int) { // want f3:"&map\\[0:{}\\]"
 	// This can be a nil dereference.
 	*ptr = [3]int{}
 }
@@ -49,11 +44,4 @@ func f5(x *int, ptr *[3]int, i interface{}, m map[int]int) {
 	if m != nil {
 		m[5] = 5
 	}
-}
-
-func f6() {
-	// test if the analysis finds potential nil dereference in imported packages.
-	bytes.NewBuffer([]byte{}).Bytes()
-	var v *http.Response
-	v.Cookies()
 }
