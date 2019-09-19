@@ -22,6 +22,9 @@ var Analyzer = &analysis.Analyzer{
 	ResultType: reflect.TypeOf(PanicArgs{}),
 }
 
+// ssapkgs stores compiled ssa packages for checking imported packages.
+// Note that imported packages are not fully compiled because of lack of
+// files by default, and need to be compiled.
 var ssapkgs = make(map[string]*ssa.Package)
 
 // PanicArgs has the information about arguments which causes panic on calling the function when it is nil.
@@ -31,13 +34,15 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	pa := PanicArgs{}
 	ssainput := pass.ResultOf[buildssa.Analyzer].(*buildssa.SSA)
 	for _, fn := range ssainput.SrcFuncs {
-		runFunc(pass, fn, pa, true)
+		checkFunc(fn, pa, true)
 	}
 	return pa, nil
-
 }
 
-func runFunc(pass *analysis.Pass, fn *ssa.Function, pa PanicArgs, src bool) {
+// checkFunc appends the information of arguments to pa when they cause
+// panic in fn. Also, if src is set true, the CallInstructions in fn
+// will be checked as the same.
+func checkFunc(fn *ssa.Function, pa PanicArgs, src bool) {
 	if _, ok := pa[fn.Object().(*types.Func).FullName()]; ok {
 		return
 	}
@@ -49,42 +54,48 @@ func runFunc(pass *analysis.Pass, fn *ssa.Function, pa PanicArgs, src bool) {
 			continue
 		}
 
+	refLoop:
 		for _, fpr := range *fp.Referrers() {
 			switch instr := fpr.(type) {
 			case *ssa.FieldAddr:
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
+				}
+			case *ssa.Field:
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
+					appendPanicArg(pa, fn, i)
+					break refLoop
 				}
 			case *ssa.IndexAddr:
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
 				}
 			case *ssa.TypeAssert:
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
 				}
 			case *ssa.Slice:
-				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && instr.X == fp && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
 				}
 			case *ssa.Store:
-				if instr.Addr == fp && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if instr.Addr == fp && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
 				}
 			case *ssa.MapUpdate:
-				if instr.Map == fp && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if instr.Map == fp && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
 				}
 			case *ssa.UnOp:
-				if instr.X == fp && instr.Op == token.MUL && !isNilChecked(fp, instr.Block(), []*ssa.BasicBlock{}) {
+				if instr.X == fp && instr.Op == token.MUL && !isNilChecked(fp, instr.Block(), nil) {
 					appendPanicArg(pa, fn, i)
-					break
+					break refLoop
 				}
 			}
 		}
@@ -94,21 +105,25 @@ func runFunc(pass *analysis.Pass, fn *ssa.Function, pa PanicArgs, src bool) {
 		return
 	}
 
+	// Check function calls in SrcFuncs.
 	for _, b := range fn.Blocks {
 		for _, i := range b.Instrs {
 			c, ok := i.(ssa.CallInstruction)
 			if !ok {
 				continue
 			}
-			checkCall(pass, c, fn, pa)
+			checkCall(c, pa)
 		}
 	}
 }
 
-func checkCall(pass *analysis.Pass, c ssa.CallInstruction, fn *ssa.Function, pa PanicArgs) {
+// checkCall checks a ssa.CallInstruction and appends the information to pa
+// if called function panics on nil arguments.
+// This check is executed only when the function is in the imported package.
+func checkCall(c ssa.CallInstruction, pa PanicArgs) {
 	var sf *ssa.Function
 	if c.Common().IsInvoke() {
-		sf = fn.Prog.FuncValue(c.Common().Method)
+		sf = c.Parent().Prog.FuncValue(c.Common().Method)
 	} else {
 		sf = c.Common().StaticCallee()
 	}
@@ -119,73 +134,101 @@ func checkCall(pass *analysis.Pass, c ssa.CallInstruction, fn *ssa.Function, pa 
 	if _, ok := pa[sf.Object().(*types.Func).FullName()]; ok {
 		return
 	}
+	if sf.Pkg == c.Parent().Pkg {
+		return
+	}
 
-	if ssapkg, ok := ssapkgs[sf.Pkg.Pkg.Name()]; ok {
+	path := sf.Pkg.Pkg.Path()
+
+	check := func(ssapkg *ssa.Package) {
 		if f := ssapkg.Func(sf.Name()); f != nil {
-			runFunc(pass, f, pa, false)
+			checkFunc(f, pa, false)
+			return
 		}
 		for _, m := range ssapkg.Members {
 			mt, ok := m.(*ssa.Type)
 			if !ok {
 				continue
 			}
-			runMethod(pass, pa, ssapkg, mt.Type(), sf.Name())
+			t := mt.Type()
+			if c.Common().IsInvoke() {
+				if !types.Implements(t, ssapkg.Pkg.Scope().Lookup(c.Common().Value.Type().String()).Type().(*types.Interface)) {
+					continue
+				}
+				checkMethod(pa, ssapkg, t, sf.Name())
+			} else {
+				if len(c.Common().Args) < 1 {
+					continue
+				}
+				recv := c.Common().Args[0].Type()
+				if t.String() == recv.String() {
+					checkMethod(pa, ssapkg, t, sf.Name())
+					continue
+				}
+				p := types.NewPointer(t)
+				if p.String() == recv.String() {
+					checkMethod(pa, ssapkg, p, sf.Name())
+				}
+			}
 		}
 		return
 	}
 
-	cfg := &packages.Config{}
-	cfg.Mode = packages.LoadAllSyntax
-	// cfg.Tests = true
-	pkgs, _ := packages.Load(cfg, sf.Pkg.Pkg.Name())
-	for _, pkg := range pkgs {
-		prog := ssa.NewProgram(pkg.Fset, 0)
-		created := make(map[*types.Package]bool)
-		var createAll func(pkgs []*types.Package)
-		createAll = func(pkgs []*types.Package) {
-			for _, p := range pkgs {
-				if !created[p] {
-					created[p] = true
-					prog.CreatePackage(p, nil, nil, true)
-					createAll(p.Imports())
-				}
-			}
-		}
-		createAll(pkg.Types.Imports())
-		ssapkg := prog.CreatePackage(pkg.Types, pkg.Syntax, pkg.TypesInfo, true)
-		ssapkg.Build()
-		ssapkgs[sf.Pkg.Pkg.Name()] = ssapkg
-		if f := ssapkg.Func(sf.Name()); f != nil {
-			runFunc(pass, f, pa, false)
-			break
-		}
-		for _, m := range ssapkg.Members {
-			mt, ok := m.(*ssa.Type)
-			if !ok {
-				continue
-			}
-			runMethod(pass, pa, ssapkg, mt.Type(), sf.Name())
-		}
-		continue
+	if ssapkg, ok := ssapkgs[path]; ok {
+		check(ssapkg)
+		return
 	}
+
+	check(buildSSA(path))
 }
 
-func runMethod(pass *analysis.Pass, pa PanicArgs, ssapkg *ssa.Package, t types.Type, name string) {
+// checkMethod finds the method of t whose name is the name and apply checkFunc to it.
+func checkMethod(pa PanicArgs, ssapkg *ssa.Package, t types.Type, name string) {
 	_, index, indirect := types.LookupFieldOrMethod(t, false, ssapkg.Pkg, name)
 	if index == nil && !indirect {
 		return
 	}
 	if indirect {
-		if f := ssapkg.Prog.LookupMethod(types.NewPointer(t), ssapkg.Pkg, name); f != nil {
-			runFunc(pass, f, pa, false)
+		if _, ok := t.(*types.Pointer); !ok {
+			t = types.NewPointer(t)
+		}
+		if f := ssapkg.Prog.LookupMethod(t, ssapkg.Pkg, name); f != nil {
+			checkFunc(f, pa, false)
 		}
 		return
 	}
 	if f := ssapkg.Prog.LookupMethod(t, ssapkg.Pkg, name); f != nil {
-		runFunc(pass, f, pa, false)
+		checkFunc(f, pa, false)
 	}
 }
 
+// buildSSA builds SSA from the path. The path should suggest only one package.
+func buildSSA(path string) *ssa.Package {
+	// Build imported package.
+	cfg := &packages.Config{}
+	cfg.Mode = packages.LoadSyntax
+	pkgs, _ := packages.Load(cfg, path)
+	pkg := pkgs[0]
+	prog := ssa.NewProgram(pkg.Fset, 0)
+	created := make(map[*types.Package]bool)
+	var createAll func(pkgs []*types.Package)
+	createAll = func(pkgs []*types.Package) {
+		for _, p := range pkgs {
+			if !created[p] {
+				created[p] = true
+				prog.CreatePackage(p, nil, nil, true)
+				createAll(p.Imports())
+			}
+		}
+	}
+	createAll(pkg.Types.Imports())
+	ssapkg := prog.CreatePackage(pkg.Types, pkg.Syntax, pkg.TypesInfo, false)
+	ssapkg.Build()
+	ssapkgs[path] = ssapkg
+	return ssapkg
+}
+
+// appendPanicArg appends the information of arguments that cause panic on fn to pa.
 func appendPanicArg(pa PanicArgs, fn *ssa.Function, i int) {
 	ff := fn.Object().(*types.Func).FullName()
 	if _, ok := pa[ff]; ok {
@@ -196,6 +239,7 @@ func appendPanicArg(pa PanicArgs, fn *ssa.Function, i int) {
 	pa[ff][i] = struct{}{}
 }
 
+// isNillable returns true when the values of t can be nil.
 func isNillable(t types.Type) bool {
 	switch t.Underlying().(type) {
 	case *types.Slice,
@@ -208,6 +252,7 @@ func isNillable(t types.Type) bool {
 	}
 }
 
+// isNilChecked returns true when the v is already nil checked and definitely not nil in the b.
 func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited []*ssa.BasicBlock) bool {
 	for _, v := range visited {
 		if v == b {
@@ -240,9 +285,8 @@ func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited []*ssa.BasicBlock
 	return isNilChecked(v, b, visited)
 }
 
-func isNil(v ssa.Value) bool {
-	if v, ok := v.(*ssa.Const); ok {
-		return v.IsNil()
-	}
-	return false
+// isNil returns true when the value is a constant nil.
+func isNil(value ssa.Value) bool {
+	v, ok := value.(*ssa.Const)
+	return ok && v.IsNil()
 }
