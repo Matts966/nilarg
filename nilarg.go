@@ -9,7 +9,21 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-const Doc = `check if the function will panic on nil arguments
+const Doc = `check for arguments that cause panic when they are nil
+
+The nilarg checker finds arguments that can be nil and cause panic in
+function when they are nil and export their information as Object Facts.
+
+The conditions that export Fact are such as:
+	f(x *int) { *x }
+and:
+	f(m map[int]int) { map[5] = 5 }
+and:
+	f(i interface{}) { i.(interface{ f() }) }
+
+These codes do not always cause panic, but panic if the argument is nil.
+Also the nilarg checker exports some false positive cases when the
+instructions that refer the arguments are not reachable.
 `
 
 var Analyzer = &analysis.Analyzer{
@@ -34,17 +48,11 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-// checkFunc finds arguments of fn that can be nil and cause panic in
-// fn when they are nil and export their information as the Facts.
-//
-// The Facts are such as:
-// 	f(x *int) { *x }
-// and:
-// 	f(m map[int]int) { map[5] = 5 }
-// and:
-// 	f(i interface{}) { i.(interface{ f() }) }
-//
-// These codes do not always cause panic, but panic if the argument is nil.
+// This function checkFunc checks all the nillable type arguments of
+// the function fn and instructions in fn that refer the arguments.
+// If those instructions cause panic when the referred argument is nil,
+// then this function exports the information as the Object Fact of fn
+// using panicArgs type.
 func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 	fact := panicArgs{}
 	for i, fp := range fn.Params {
