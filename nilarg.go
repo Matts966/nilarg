@@ -136,6 +136,7 @@ func isNillable(t types.Type) bool {
 	case *types.Slice,
 		*types.Interface,
 		*types.Map,
+		*types.Chan,
 		*types.Pointer:
 		return true
 	default:
@@ -143,13 +144,11 @@ func isNillable(t types.Type) bool {
 	}
 }
 
-// isNilChecked returns true when the v is already nil checked and
-// definitely not nil in the b.
-func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited []*ssa.BasicBlock) bool {
-	for _, v := range visited {
-		if v == b {
-			return false
-		}
+// isNilChecked reports whether block b is dominated by a check
+// of the condition v != nil.
+func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited map[*ssa.BasicBlock]struct{}) bool {
+	if _, ok := visited[b]; ok {
+		return false
 	}
 	// We could be more precise with full dataflow
 	// analysis of control-flow joins.
@@ -173,7 +172,7 @@ func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited []*ssa.BasicBlock
 			}
 		}
 	}
-	visited = append(visited, b)
+	visited[b] = struct{}{}
 	return isNilChecked(v, b, visited)
 }
 
