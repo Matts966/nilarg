@@ -12,9 +12,9 @@ import (
 const Doc = `check for arguments that cause panic when they are nil
 
 The nilarg checker finds arguments that can be nil and cause panic in
-function when they are nil and export their information as Object Facts.
+function when they are nil.
 
-The conditions that export Fact are such as:
+The conditions are such as:
 	f(x *int) { *x }
 and:
 	f(m map[int]int) { map[5] = 5 }
@@ -22,7 +22,7 @@ and:
 	f(i interface{}) { i.(interface{ f() }) }
 
 These codes do not always cause panic, but panic if the argument is nil.
-Also the nilarg checker exports some false positive cases when the
+Also the nilarg checker reports some false positive cases when the
 instructions that refer the arguments are not reachable.
 `
 
