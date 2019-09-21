@@ -45,3 +45,11 @@ func f5(x *int, ptr *[3]int, i interface{}, m map[int]int) {
 		m[5] = 5
 	}
 }
+
+func f6(i interface{}) interface{ f() } {
+	i2, ok := i.(interface{ f() })
+	if ok {
+		return i2
+	}
+	return nil
+}

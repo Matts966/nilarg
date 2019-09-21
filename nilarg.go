@@ -89,8 +89,10 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 					break refLoop
 				}
 			case *ssa.TypeAssert:
-				// fp.(someType)
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
+				// Only the 1-result type assertion panics.
+				//
+				// _ = fp.(someType)
+				if instr.X == fp && !instr.CommaOk && !isNilChecked(fp, instr.Block(), nil) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
