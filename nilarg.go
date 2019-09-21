@@ -132,13 +132,13 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 	}
 }
 
-// isNillable returns true when the values of t can be nil.
+// isNillable returns true when the values of t can be nil
+// and cause nil pointer dereference.
 func isNillable(t types.Type) bool {
 	switch t.Underlying().(type) {
 	case *types.Slice,
 		*types.Interface,
 		*types.Map,
-		*types.Chan,
 		*types.Pointer:
 		return true
 	default:
