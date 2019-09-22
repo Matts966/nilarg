@@ -3,6 +3,7 @@ package nilarg
 import (
 	"go/token"
 	"go/types"
+	"math/big"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/buildssa"
@@ -69,7 +70,7 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 		// Check all the referrers and if the instruction cause panic when
 		// fp is nil, add fact of it and break this loop.
 		for _, fpr := range *fp.Referrers() {
-			start := map[*ssa.BasicBlock]struct{}{}
+			start := big.NewInt(0)
 			switch instr := fpr.(type) {
 			case *ssa.FieldAddr:
 				// the address of fp.field
@@ -149,8 +150,10 @@ func isNillable(t types.Type) bool {
 
 // isNilChecked reports whether block b is dominated by a check
 // of the condition v != nil.
-func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited map[*ssa.BasicBlock]struct{}) bool {
-	if _, ok := visited[b]; ok {
+func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited *big.Int) bool {
+	vis := big.NewInt(1)
+	vis.Lsh(vis, uint(b.Index))
+	if vis.Or(visited, vis) == visited {
 		return false
 	}
 	// We could be more precise with full dataflow
@@ -175,7 +178,7 @@ func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited map[*ssa.BasicBlo
 			}
 		}
 	}
-	visited[b] = struct{}{}
+	visited = vis
 	return isNilChecked(v, bi, visited)
 }
 
