@@ -1,4 +1,6 @@
-package a
+package a // want package:"&{}"
+
+import "bytes"
 
 type X struct{ f, g int }
 
@@ -54,7 +56,29 @@ func f6(i interface{}) interface{ f() } {
 	return nil
 }
 
-func f7(i interface{}) interface{ f() } {
+// f7 can also cause panic because f3 can.
+func f7(ptr *[3]int) { // want f7:"&map\\[0:{}\\]"
+	f3(ptr)
+}
+
+// f8 can also cause panic because f7 can.
+func f8(ptr *[3]int) { // want f8:"&map\\[0:{}\\]"
+	f7(ptr)
+}
+
+// f9 doesn't casuse panic because of nil check.
+func f9(ptr *[3]int) {
+	if ptr != nil {
+		f7(ptr)
+	}
+}
+
+// f10 can cause panic because Bytes does.
+func f10(b *bytes.Buffer) { // want f10:"&map\\[0:{}\\]"
+	b.Bytes()
+}
+
+func f11(i interface{}) interface{ f() } {
 	if i != nil {
 		if true {
 			if true {

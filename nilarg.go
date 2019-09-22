@@ -3,7 +3,9 @@ package nilarg
 import (
 	"go/token"
 	"go/types"
+	"log"
 	"math/big"
+	"reflect"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/buildssa"
@@ -28,11 +30,12 @@ instructions that refer the arguments are not reachable.
 `
 
 var Analyzer = &analysis.Analyzer{
-	Name:      "nilarg",
-	Doc:       Doc,
-	Run:       run,
-	Requires:  []*analysis.Analyzer{buildssa.Analyzer},
-	FactTypes: []analysis.Fact{new(panicArgs)},
+	Name:       "nilarg",
+	Doc:        Doc,
+	Run:        run,
+	Requires:   []*analysis.Analyzer{buildssa.Analyzer},
+	FactTypes:  []analysis.Fact{new(panicArgs), new(pkgDone)},
+	ResultType: reflect.TypeOf([]analysis.ObjectFact{}),
 }
 
 // panicArgs has the information about arguments which causes panic on
@@ -41,20 +44,33 @@ type panicArgs map[int]struct{}
 
 func (*panicArgs) AFact() {}
 
+type pkgDone struct{}
+
+func (*pkgDone) AFact() {}
+
 func run(pass *analysis.Pass) (interface{}, error) {
 	ssainput := pass.ResultOf[buildssa.Analyzer].(*buildssa.SSA)
-	for _, fn := range ssainput.SrcFuncs {
-		checkFunc(pass, fn)
+	for {
+		cc := 0
+		for _, fn := range ssainput.SrcFuncs {
+			if changed := checkFunc(pass, fn); changed {
+				cc++
+			}
+		}
+		if cc == 0 {
+			pass.ExportPackageFact(&pkgDone{})
+			log.Println(pass.AllObjectFacts())
+			return pass.AllObjectFacts(), nil
+		}
 	}
-	return nil, nil
 }
 
 // This function checkFunc checks all the nillable type arguments of
 // the function fn and instructions in fn that refer the arguments.
 // If those instructions cause panic when the referred argument is nil,
-// then this function exports the information as the Object Fact of fn
+// then this function exports the information as the ObjectFact of fn
 // using panicArgs type.
-func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
+func checkFunc(pass *analysis.Pass, fn *ssa.Function) bool {
 	fact := panicArgs{}
 	for i, fp := range fn.Params {
 		// If the argument fp can't be nil or there are no referrers
@@ -72,6 +88,37 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 		for _, fpr := range *fp.Referrers() {
 			start := big.NewInt(0)
 			switch instr := fpr.(type) {
+			case ssa.CallInstruction:
+				if !instr.Common().IsInvoke() {
+					ffact := panicArgs{}
+					if instr.Common().StaticCallee() == nil {
+						// a builtin or dynamically dispatched function call
+						continue
+					}
+					f := instr.Common().StaticCallee().Object()
+					if f.Pkg() != pass.Pkg {
+						if !pass.ImportPackageFact(f.Pkg(), &pkgDone{}) {
+							// not changed but can change later
+							return true
+						}
+						if pass.ImportObjectFact(f, &ffact) {
+							for i := range ffact {
+								if instr.Common().Args[i] == fp && !isNilChecked(fp, instr.Block(), start) {
+									fact[i] = struct{}{}
+									break refLoop
+								}
+							}
+						}
+					}
+					if pass.ImportObjectFact(f, &ffact) {
+						for i := range ffact {
+							if instr.Common().Args[i] == fp && !isNilChecked(fp, instr.Block(), start) {
+								fact[i] = struct{}{}
+								break refLoop
+							}
+						}
+					}
+				}
 			case *ssa.FieldAddr:
 				// the address of fp.field
 				if instr.X == fp && !isNilChecked(fp, instr.Block(), start) {
@@ -130,8 +177,14 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 	}
 	// If no argument cause panic, skip exporting the fact.
 	if len(fact) > 0 && fn.Object() != nil {
+		var oldFact panicArgs
+		if pass.ImportObjectFact(fn.Object(), &oldFact) && !reflect.DeepEqual(oldFact, fact) {
+			pass.ExportObjectFact(fn.Object(), &fact)
+			return true
+		}
 		pass.ExportObjectFact(fn.Object(), &fact)
 	}
+	return false
 }
 
 // isNillable returns true when the values of t can be nil
