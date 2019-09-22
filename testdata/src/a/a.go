@@ -53,3 +53,14 @@ func f6(i interface{}) interface{ f() } {
 	}
 	return nil
 }
+
+func f7(i interface{}) interface{ f() } {
+	if i != nil {
+		if true {
+			if true {
+				return i.(interface{ f() })
+			}
+		}
+	}
+	return nil
+}

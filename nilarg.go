@@ -69,22 +69,23 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 		// Check all the referrers and if the instruction cause panic when
 		// fp is nil, add fact of it and break this loop.
 		for _, fpr := range *fp.Referrers() {
+			start := map[*ssa.BasicBlock]struct{}{}
 			switch instr := fpr.(type) {
 			case *ssa.FieldAddr:
 				// the address of fp.field
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.Field:
 				// fp.field
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.IndexAddr:
 				// fp[i]
-				if instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.X == fp && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
@@ -92,7 +93,7 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 				// Only the 1-result type assertion panics.
 				//
 				// _ = fp.(someType)
-				if instr.X == fp && !instr.CommaOk && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.X == fp && !instr.CommaOk && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
@@ -101,25 +102,25 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) {
 				// dereference iff fp is nil.
 				//
 				// fp[:]
-				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && instr.X == fp && !isNilChecked(fp, instr.Block(), nil) {
+				if _, ok := instr.X.Type().Underlying().(*types.Pointer); ok && instr.X == fp && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.Store:
 				// *fp = v
-				if instr.Addr == fp && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.Addr == fp && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.MapUpdate:
 				// *fp[x] = y
-				if instr.Map == fp && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.Map == fp && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
 			case *ssa.UnOp:
 				// *fp
-				if instr.X == fp && instr.Op == token.MUL && !isNilChecked(fp, instr.Block(), nil) {
+				if instr.X == fp && instr.Op == token.MUL && !isNilChecked(fp, instr.Block(), start) {
 					fact[i] = struct{}{}
 					break refLoop
 				}
@@ -175,7 +176,7 @@ func isNilChecked(v *ssa.Parameter, b *ssa.BasicBlock, visited map[*ssa.BasicBlo
 		}
 	}
 	visited[b] = struct{}{}
-	return isNilChecked(v, b, visited)
+	return isNilChecked(v, bi, visited)
 }
 
 // isNil returns true when the value is a constant nil.
