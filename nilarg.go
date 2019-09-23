@@ -94,7 +94,7 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) bool {
 			case ssa.CallInstruction:
 				if !instr.Common().IsInvoke() {
 					ffact := panicArgs{}
-					if instr.Common().StaticCallee() == nil {
+					if instr.Common().StaticCallee() == nil || instr.Common().StaticCallee().Object() == nil {
 						// a builtin or dynamically dispatched function call
 						continue
 					}
@@ -115,6 +115,11 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) bool {
 					}
 					if pass.ImportObjectFact(f, &ffact) {
 						for i := range ffact {
+
+							if i >= len(instr.Common().Args) {
+								continue
+							}
+
 							if instr.Common().Args[i] == fp && !isNilChecked(fp, instr.Block(), start) {
 								fact[i] = struct{}{}
 								break refLoop
@@ -263,6 +268,11 @@ func runFunc(pass *analysis.Pass, fn *ssa.Function) {
 				var fact panicArgs
 				if pass.ImportObjectFact(s.Object(), &fact) {
 					for i := range fact {
+
+						if i >= len(c.Common().Args) {
+							continue
+						}
+
 						if nilnessOf(stack, c.Common().Args[i]) == isnil {
 							pass.Reportf(c.Pos(), "this call can cause panic")
 						}
