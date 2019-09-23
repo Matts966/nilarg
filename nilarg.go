@@ -61,6 +61,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 	}
 
+	// Push the information about nilness of values like nilness and
+	// if calls are called with nil value and they can cause panic
+	// with nil arguments, report the call.
 	for _, fn := range ssainput.SrcFuncs {
 		runFunc(pass, fn)
 	}
