@@ -88,3 +88,11 @@ func f11(i interface{}) interface{ f() } {
 	}
 	return nil
 }
+
+type s struct {
+	vars []*int
+}
+func (x *s) At(i int) *int { return x.vars[i] } // want At:"&map\\[0:{}\\]"
+func f12(r *int, params *s) { // want f12:"&map\\[1:{}\\]"
+	_ = params.At(1)
+}
