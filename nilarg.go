@@ -109,6 +109,11 @@ func checkFunc(pass *analysis.Pass, fn *ssa.Function) bool {
 						}
 						if pass.ImportObjectFact(f, &ffact) {
 							for i := range ffact {
+
+								if i >= len(instr.Common().Args) {
+									continue
+								}
+
 								if instr.Common().Args[i] == fp && !isNilChecked(fp, instr.Block(), start) {
 									fact[i] = struct{}{}
 									break refLoop
